@@ -1,0 +1,138 @@
+<!--
+based on http://webaudiodemos.appspot.com/pitchdetect/index.html and http://js1k.com/2013-spring/demo/1431
+
+-->
+<html>
+	<body marginwidth="0" marginheight="0">
+		<canvas id="c" width="800" height="600"></canvas>
+		<script>
+b=document.body;c=document.getElementById('c');a=c.getContext('2d');
+document.body.clientWidth;
+
+c.width=800;c.height=600;v=450;t=0;o=255;m=Math;
+
+function i() {
+	t+=0.01;w=600+m.sin(t)*100;f=function(n){return m.floor(m.sin(t*n)*o)};r=f(3);g=f(5);n=f(7);p=function(n){return parseInt(n)};
+	with(a){
+		F=function(a,b,c,d){fillRect(a,b,c,d)}
+		S=function(r,g,b){fillStyle="rgba("+r+","+g+","+n+",0.1)"}
+		D=function(a,b,c,d,e){drawImage(a,b,c,d,e)}
+		T=function(a,b){translate(a,b)}
+
+		S(p(r/3),p(g/4),p(n/5));F(0,0,w,w);F(w,w,w,w);S(r,g,b);F(w,0,w,w);F(0,w,w,w);
+
+		D(c,0,w,w,w);
+		D(c,w,w,w,w);
+		D(c,w,0,w,w);
+		D(c,0,0,w,w);
+		T(v,v);
+		rotate(0.01*m.abs(m.sin(t)));
+		T(-v,-v);
+	}
+	setTimeout('i()',10);
+}
+i();
+
+
+
+window.AudioContext = window.AudioContext || window.webkitAudioContext;
+
+var audioContext = new AudioContext();
+/*
+function getUserMedia(dictionary, callback) {
+    try {
+        navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+        navigator.getUserMedia(dictionary, callback, error);
+    } catch (e) {
+    	console.log(e);
+        alert('getUserMedia threw exception :' + e);
+    }
+}*/
+
+navigator.webkitGetUserMedia({audio:true}, gotStream, function(){ console.log('failure')});
+
+
+function gotStream(stream) {
+	var mediaStreamSource = audioContext.createMediaStreamSource(stream);
+	analyser = audioContext.createAnalyser();
+	analyser.fftSize = 2048;
+	mediaStreamSource.connect(analyser);
+	updatePitch();
+}
+
+
+var buflen = 2048;
+var buf = new Uint8Array(buflen);
+
+function noteFromPitch(frequency) {
+	var noteNum = 12 * (m.log(frequency / 440)/m.log(2));
+	return m.round(noteNum) + 69;
+}
+
+function autoCorrelate(buf, sampleRate) {
+	var MIN_SAMPLES = 4;	// 11kHz
+	var MAX_SAMPLES = 1000;	// 44Hz
+	var SIZE = 1000;
+	var best_offset = -1;
+	var best_correlation = 0;
+	var rms = 0;
+
+	confidence = 0;
+	currentPitch = 0;
+
+	if (buf.length < (SIZE + MAX_SAMPLES - MIN_SAMPLES))
+		return;  // Not enough data
+
+	for (var i=0;i<SIZE;i++) {
+		var val = (buf[i] - 128)/128;
+		rms += val*val;
+	}
+	rms = m.sqrt(rms/SIZE);
+
+	for (var offset = MIN_SAMPLES; offset <= MAX_SAMPLES; offset++) {
+		var correlation = 0;
+
+		for (var i=0; i<SIZE; i++) {
+			correlation += m.abs(((buf[i] - 128)/128)-((buf[i+offset] - 128)/128));
+		}
+		correlation = 1 - (correlation/SIZE);
+		if (correlation > best_correlation) {
+			best_correlation = correlation;
+			best_offset = offset;
+		}
+	}
+	if ((rms>0.01)&&(best_correlation > 0.01)) {
+		confidence = best_correlation * rms * 10000;
+		currentPitch = sampleRate / best_offset;
+	}
+}
+
+function frequencyFromNoteNumber(note) {
+	return 440 * m.pow(2, (note - 69) / 12);
+}
+
+function centsOffFromPitch(frequency, note) {
+	return (1200 * m.log(frequency / frequencyFromNoteNumber(note)) / m.log(2));
+}
+
+function updatePitch(time) {
+	var cycles = new Array;
+	analyser.getByteTimeDomainData(buf);
+
+	autoCorrelate(buf, audioContext.sampleRate);
+
+	note   = noteFromPitch(currentPitch);
+	detune = centsOffFromPitch(currentPitch, note);
+	t      = note / detune;
+
+	console.log((["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"])[note % 12]);
+
+	if (!window.requestAnimationFrame)
+		window.requestAnimationFrame = window.webkitRequestAnimationFrame;
+
+	rafID = window.requestAnimationFrame(updatePitch);
+}
+		</script>
+
+</body>
+</html>
